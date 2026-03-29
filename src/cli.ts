@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 
 import { extractFrontend } from "./extractor.js";
+import { startPreviewServer } from "./preview.js";
 import type { ExportMode } from "./types.js";
 
 interface CliOptions {
@@ -14,6 +15,11 @@ interface CliOptions {
   depth: string;
   maxPages: string;
   userAgent?: string;
+}
+
+interface RunOptions {
+  port: string;
+  host: string;
 }
 
 async function runExtraction(url: string, opts: CliOptions): Promise<void> {
@@ -73,11 +79,36 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
         console.log(`- ${warning}`);
       }
     }
+
+    console.log(`\nPreview with: scrapify run ${outDir}`);
   } catch (error) {
     console.error("Extraction failed:");
     console.error(error);
     process.exit(1);
   }
+}
+
+async function runPreview(dirArg: string | undefined, opts: RunOptions): Promise<void> {
+  const dir = path.resolve(dirArg || "./output");
+  const port = Number(opts.port);
+  if (!Number.isFinite(port) || port < 1 || port > 65535) {
+    console.error(`Invalid port: ${opts.port}`);
+    process.exit(1);
+  }
+
+  const host = String(opts.host || "127.0.0.1");
+  const server = await startPreviewServer({ dir, port, host });
+
+  console.log(`Serving scraped site from ${dir}`);
+  console.log(`Open: http://${host}:${port}`);
+  console.log("Press Ctrl+C to stop.");
+
+  const stop = () => {
+    server.close(() => process.exit(0));
+  };
+
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
 }
 
 const defaultOptions: CliOptions = {
@@ -93,25 +124,43 @@ const argv0 = path.basename(process.argv[1] || "");
 const isScrapify = argv0 === "scrapify" || invokedAs === "scrapify.js";
 
 if (isScrapify) {
-  const program = new Command();
-  program
-    .name("scrapify")
-    .description("Scrape a site into clean editable frontend code")
-    .argument("<url>", "Website URL")
-    .option("-o, --out <dir>", "Output directory", defaultOptions.out)
-    .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
-    .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
-    .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
-    .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)
-    .option("--user-agent <ua>", "Custom user agent")
-    .action(async (url, opts) => {
-      await runExtraction(url, opts as CliOptions);
-    });
+  if (process.argv[2] === "run") {
+    const runProgram = new Command();
+    runProgram
+      .name("scrapify run")
+      .description("Serve a scraped output folder locally")
+      .argument("[dir]", "Scraped output directory", "./output")
+      .option("-p, --port <port>", "Port", "4173")
+      .option("--host <host>", "Host", "127.0.0.1")
+      .action(async (dir, opts) => {
+        await runPreview(typeof dir === "string" ? dir : undefined, opts as RunOptions);
+      });
 
-  program.parseAsync(process.argv).catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+    runProgram.parseAsync(["node", "scrapify", ...process.argv.slice(3)]).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+  } else {
+    const program = new Command();
+    program
+      .name("scrapify")
+      .description("Scrape a site into clean editable frontend code")
+      .argument("<url>", "Website URL")
+      .option("-o, --out <dir>", "Output directory", defaultOptions.out)
+      .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
+      .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
+      .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
+      .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)
+      .option("--user-agent <ua>", "Custom user agent")
+      .action(async (url, opts) => {
+        await runExtraction(url, opts as CliOptions);
+      });
+
+    program.parseAsync(process.argv).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+  }
 } else {
   const program = new Command();
   program
@@ -131,6 +180,16 @@ if (isScrapify) {
     .option("--user-agent <ua>", "Custom user agent")
     .action(async (url, opts) => {
       await runExtraction(url, opts as CliOptions);
+    });
+
+  program
+    .command("run")
+    .description("Serve a scraped output folder locally")
+    .argument("[dir]", "Scraped output directory", "./output")
+    .option("-p, --port <port>", "Port", "4173")
+    .option("--host <host>", "Host", "127.0.0.1")
+    .action(async (dir, opts) => {
+      await runPreview(typeof dir === "string" ? dir : undefined, opts as RunOptions);
     });
 
   program.parseAsync(process.argv).catch((err) => {

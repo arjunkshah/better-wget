@@ -26,6 +26,9 @@ npm run build
 # direct command
 scrapify https://example.com -o ./output/example
 
+# run the scraped site locally
+scrapify run ./output/example --port 4173
+
 # whole-site clean crawl (default): follows internal links and strips scripts/tracker junk
 node dist/cli.js frontend https://example.com -o ./output/example --mode clean
 
