@@ -23,6 +23,9 @@ npm run build
 ## Usage
 
 ```bash
+# direct command
+scrapify https://example.com -o ./output/example
+
 # whole-site clean crawl (default): follows internal links and strips scripts/tracker junk
 node dist/cli.js frontend https://example.com -o ./output/example --mode clean
 

@@ -53,6 +53,8 @@ interface PagePaths {
   routeKey: string;
 }
 
+type BinaryAssetKind = "image" | "font" | "other";
+
 function normalizeUrl(raw: string, baseUrl: string): string | null {
   try {
     return new URL(raw, baseUrl).toString();
@@ -103,6 +105,26 @@ function buildAssetFilePath(assetUrl: string, outputRoot: string, fallbackExt = 
   return path.join(dir, `${base}${ext}`);
 }
 
+function inferBinaryAssetKind(assetUrl: string): BinaryAssetKind {
+  const pathname = new URL(assetUrl).pathname.toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|svg|ico|avif)$/.test(pathname)) return "image";
+  if (/\.(woff2?|ttf|otf|eot)$/.test(pathname)) return "font";
+  return "other";
+}
+
+function rewriteCssUrls(
+  cssText: string,
+  replacer: (rawUrl: string) => string
+): string {
+  return cssText.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (full, quote: string, rawUrl: string) => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed || trimmed.startsWith("data:") || trimmed.startsWith("#")) return full;
+    const replaced = replacer(trimmed);
+    const q = quote || '"';
+    return `url(${q}${replaced}${q})`;
+  });
+}
+
 function getPagePaths(pageUrl: string, outDir: string): PagePaths {
   const u = new URL(pageUrl);
   const segments = u.pathname
@@ -146,29 +168,14 @@ async function fetchWithTimeout(url: string, timeoutMs: number, userAgent?: stri
 
 async function downloadTextAsset(
   assetUrl: string,
-  outDir: string,
   timeoutMs: number,
-  userAgent: string | undefined,
-  fallbackExt: string,
-  assetMap: Map<string, string>
-): Promise<{ savedPath: string; text: string } | null> {
-  const existingPath = assetMap.get(assetUrl);
-  if (existingPath) {
-    const res = await fetchWithTimeout(assetUrl, timeoutMs, userAgent);
-    if (!res.ok) return null;
-    return { savedPath: existingPath, text: await res.text() };
-  }
+  userAgent: string | undefined
+): Promise<string | null> {
 
   const res = await fetchWithTimeout(assetUrl, timeoutMs, userAgent);
   if (!res.ok) return null;
 
-  const text = await res.text();
-  const targetPath = buildAssetFilePath(assetUrl, outDir, fallbackExt);
-  await saveTextFile(targetPath, text);
-
-  const savedPath = path.relative(outDir, targetPath);
-  assetMap.set(assetUrl, savedPath);
-  return { savedPath, text };
+  return await res.text();
 }
 
 async function downloadBinaryAsset(
@@ -300,6 +307,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
 
     const pagePaths = getPagePaths(current.url, outDir);
     const pageDir = path.dirname(pagePaths.htmlPath);
+    const cssDir = path.dirname(pagePaths.cssPath);
 
     const cssBlocks: string[] = [];
     $("style").each((_, el) => {
@@ -315,25 +323,31 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       if (!absolute) continue;
 
       try {
-        const result = await downloadTextAsset(
-          absolute,
-          outDir,
-          options.timeoutMs,
-          options.userAgent,
-          ".css",
-          assetMap
-        );
-        if (!result) {
+        const rawCss = await downloadTextAsset(absolute, options.timeoutMs, options.userAgent);
+        if (!rawCss) {
           warnings.push(`Failed to fetch stylesheet: ${absolute}`);
           continue;
         }
 
-        cssBlocks.push(result.text);
-        maybeAddAsset(assets, seenAssetRecords, {
-          url: absolute,
-          kind: "stylesheet",
-          savedPath: result.savedPath
+        let cleanedCss = rawCss;
+        const importRegex = /@import\s+(?:url\()?['"]?([^'")]+)['"]?\)?\s*;/g;
+        const importUrls = Array.from(cleanedCss.matchAll(importRegex)).map((m) => m[1]).filter(Boolean);
+        for (const importUrl of importUrls) {
+          const importAbs = normalizeUrl(importUrl, absolute);
+          if (!importAbs) continue;
+          const importCss = await downloadTextAsset(importAbs, options.timeoutMs, options.userAgent);
+          if (!importCss) continue;
+          cleanedCss = cleanedCss.replace(`@import url(${importUrl});`, "");
+          cleanedCss += `\n\n/* inlined import: ${importAbs} */\n${importCss}`;
+        }
+
+        cleanedCss = rewriteCssUrls(cleanedCss, (rawUrl) => {
+          const abs = normalizeUrl(rawUrl, absolute);
+          if (!abs) return rawUrl;
+          return abs;
         });
+
+        cssBlocks.push(cleanedCss);
       } catch (error) {
         warnings.push(`Failed to fetch stylesheet: ${absolute} (${String(error)})`);
       }
@@ -379,7 +393,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
 
         maybeAddAsset(assets, seenAssetRecords, {
           url: absolute,
-          kind: "image",
+          kind: inferBinaryAssetKind(absolute) === "font" ? "font" : "image",
           savedPath
         });
       } catch (error) {
@@ -412,27 +426,25 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
         }
 
         try {
-          const result = await downloadTextAsset(
-            absolute,
-            outDir,
-            options.timeoutMs,
-            options.userAgent,
-            ".js",
-            assetMap
-          );
-          if (!result) {
+          const rawJs = await downloadTextAsset(absolute, options.timeoutMs, options.userAgent);
+          if (!rawJs) {
             warnings.push(`Failed to fetch script: ${absolute}`);
             continue;
           }
 
-          const localPath = path.join(outDir, result.savedPath);
+          const targetPath = buildAssetFilePath(absolute, outDir, ".js");
+          await saveTextFile(targetPath, rawJs);
+          const savedPath = path.relative(outDir, targetPath);
+          assetMap.set(absolute, savedPath);
+
+          const localPath = path.join(outDir, savedPath);
           const rel = toRelativeWebPath(pageDir, localPath);
           $(el).attr("src", rel);
 
           maybeAddAsset(assets, seenAssetRecords, {
             url: absolute,
             kind: "script",
-            savedPath: result.savedPath
+            savedPath
           });
         } catch (error) {
           warnings.push(`Failed to fetch script: ${absolute} (${String(error)})`);
@@ -460,10 +472,30 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
     });
 
     const cssMerged = cssBlocks.join("\n\n");
+    const cssUrls = Array.from(cssMerged.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g))
+      .map((m) => m[2])
+      .filter((u) => Boolean(u) && !u.startsWith("data:") && !u.startsWith("#"));
+
+    let rewrittenCss = cssMerged;
+    for (const cssUrl of cssUrls) {
+      const abs = normalizeUrl(cssUrl, current.url);
+      if (!abs) continue;
+      const savedPath = await downloadBinaryAsset(abs, outDir, options.timeoutMs, options.userAgent, assetMap);
+      if (!savedPath) continue;
+      const localPath = path.join(outDir, savedPath);
+      const rel = toRelativeWebPath(cssDir, localPath);
+      rewrittenCss = rewrittenCss.split(cssUrl).join(rel);
+      maybeAddAsset(assets, seenAssetRecords, {
+        url: abs,
+        kind: inferBinaryAssetKind(abs) === "font" ? "font" : "image",
+        savedPath
+      });
+    }
+
     const finalHtml = $.html();
 
     await saveTextFile(pagePaths.htmlPath, await formatMaybe(finalHtml, "html"));
-    await saveTextFile(pagePaths.cssPath, await formatMaybe(cssMerged, "css"));
+    await saveTextFile(pagePaths.cssPath, await formatMaybe(rewrittenCss, "css"));
 
     pages.push({
       url: current.url,
