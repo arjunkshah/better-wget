@@ -40,6 +40,9 @@ cleanscrape default https://your-app.vercel.app
 # run the scraped site locally
 cleanscrape run ./output/example --port 4173
 
+# same preview server via npm script
+npm run dev
+
 # everything mode is now default; disable with --no-everything
 cleanscrape https://example.com -o ./output/example --mode clean
 
