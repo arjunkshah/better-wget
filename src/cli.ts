@@ -11,6 +11,7 @@ import type { ExportMode } from "./types.js";
 interface CliOptions {
   out: string;
   mode: string;
+  everything?: boolean;
   timeout: string;
   depth: string;
   maxPages: string;
@@ -50,6 +51,7 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
 
   console.log(`Extracting ${url}`);
   console.log(`Mode: ${mode}`);
+  console.log(`Everything: ${opts.everything ? "yes" : "no"}`);
   console.log(`Depth: ${crawlDepth}`);
   console.log(`Max pages: ${maxPages}`);
   console.log(`Output: ${outDir}`);
@@ -59,6 +61,7 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
       url,
       outDir,
       mode,
+      everything: Boolean(opts.everything),
       timeoutMs,
       crawlDepth,
       maxPages,
@@ -148,6 +151,7 @@ if (isScrapify) {
       .argument("<url>", "Website URL")
       .option("-o, --out <dir>", "Output directory", defaultOptions.out)
       .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
+      .option("--everything", "Capture all discoverable assets/code and keep scripts")
       .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
       .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
       .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)
@@ -174,6 +178,7 @@ if (isScrapify) {
     .argument("<url>", "Website URL")
     .option("-o, --out <dir>", "Output directory", defaultOptions.out)
     .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
+    .option("--everything", "Capture all discoverable assets/code and keep scripts")
     .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
     .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
     .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)

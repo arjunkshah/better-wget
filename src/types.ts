@@ -4,6 +4,7 @@ export interface ExtractOptions {
   url: string;
   outDir: string;
   mode: ExportMode;
+  everything?: boolean;
   timeoutMs: number;
   crawlDepth: number;
   maxPages: number;

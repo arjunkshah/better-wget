@@ -29,6 +29,9 @@ scrapify https://example.com -o ./output/example
 # run the scraped site locally
 scrapify run ./output/example --port 4173
 
+# full-capture mode: keep scripts + pull all discoverable assets/files
+scrapify https://example.com -o ./output/example --everything --mode clean
+
 # whole-site clean crawl (default): follows internal links and strips scripts/tracker junk
 node dist/cli.js frontend https://example.com -o ./output/example --mode clean
 

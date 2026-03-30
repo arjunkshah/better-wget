@@ -83,7 +83,7 @@ function toSafeFileName(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 180) || "asset";
 }
 
-async function formatMaybe(content: string, parser: "html" | "css"): Promise<string> {
+async function formatMaybe(content: string, parser: "html" | "css" | "babel"): Promise<string> {
   try {
     return await prettier.format(content, { parser });
   } catch {
@@ -110,6 +110,25 @@ function inferBinaryAssetKind(assetUrl: string): BinaryAssetKind {
   if (/\.(png|jpe?g|gif|webp|svg|ico|avif)$/.test(pathname)) return "image";
   if (/\.(woff2?|ttf|otf|eot)$/.test(pathname)) return "font";
   return "other";
+}
+
+function inferAssetKind(assetUrl: string): AssetRecord["kind"] {
+  const pathname = new URL(assetUrl).pathname.toLowerCase();
+  if (pathname.endsWith(".css")) return "stylesheet";
+  if (pathname.endsWith(".js") || pathname.endsWith(".mjs")) return "script";
+  const binary = inferBinaryAssetKind(assetUrl);
+  if (binary === "image") return "image";
+  if (binary === "font") return "font";
+  return "other";
+}
+
+function isTrackerUrl(assetUrl: string): boolean {
+  try {
+    const host = new URL(assetUrl).hostname.toLowerCase();
+    return TRACKER_HOST_PATTERNS.some((pattern) => host.includes(pattern));
+  } catch {
+    return false;
+  }
 }
 
 function rewriteCssUrls(
@@ -233,6 +252,43 @@ function toRelativeWebPath(fromDir: string, toPath: string): string {
   const rel = path.relative(fromDir, toPath).split(path.sep).join("/");
   if (rel === "") return "./";
   return rel.startsWith(".") ? rel : `./${rel}`;
+}
+
+async function downloadAndRelinkAttribute(
+  $: ReturnType<typeof load>,
+  el: Parameters<ReturnType<typeof load>["prototype"]["each"]>[1] | any,
+  attr: string,
+  baseUrl: string,
+  pageDir: string,
+  outDir: string,
+  options: ExtractOptions,
+  assetMap: Map<string, string>,
+  assets: AssetRecord[],
+  seenAssetRecords: Set<string>,
+  warnings: string[]
+): Promise<void> {
+  const value = $(el).attr(attr);
+  if (!value) return;
+
+  const absolute = normalizeUrl(value, baseUrl);
+  if (!absolute) return;
+  if (isTrackerUrl(absolute)) return;
+
+  const savedPath = await downloadBinaryAsset(absolute, outDir, options.timeoutMs, options.userAgent, assetMap);
+  if (!savedPath) {
+    warnings.push(`Failed to fetch asset: ${absolute}`);
+    return;
+  }
+
+  const localPath = path.join(outDir, savedPath);
+  const rel = toRelativeWebPath(pageDir, localPath);
+  $(el).attr(attr, rel);
+
+  maybeAddAsset(assets, seenAssetRecords, {
+    url: absolute,
+    kind: inferAssetKind(absolute),
+    savedPath
+  });
 }
 
 export async function extractFrontend(options: ExtractOptions): Promise<ExtractSummary> {
@@ -401,7 +457,9 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       }
     }
 
-    if (options.mode === "clean") {
+    const keepScripts = options.mode !== "clean" || options.everything === true;
+
+    if (!keepScripts) {
       $("script").remove();
       $("noscript").remove();
       $("*[data-reactroot], *[data-reactid], *[data-v-app], *[ng-version]").removeAttr(
@@ -433,7 +491,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
           }
 
           const targetPath = buildAssetFilePath(absolute, outDir, ".js");
-          await saveTextFile(targetPath, rawJs);
+          await saveTextFile(targetPath, await formatMaybe(rawJs, "babel"));
           const savedPath = path.relative(outDir, targetPath);
           assetMap.set(absolute, savedPath);
 
@@ -448,6 +506,27 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
           });
         } catch (error) {
           warnings.push(`Failed to fetch script: ${absolute} (${String(error)})`);
+        }
+      }
+
+      if (options.everything) {
+        let inlineIndex = 0;
+        const inlineScripts = $("script:not([src])").toArray();
+        for (const el of inlineScripts) {
+          const raw = $(el).html();
+          if (!raw || !raw.trim()) continue;
+          inlineIndex += 1;
+          const targetPath = path.join(outDir, "src", "scripts", `inline-${inlineIndex}.js`);
+          await saveTextFile(targetPath, await formatMaybe(raw, "babel"));
+          const savedPath = path.relative(outDir, targetPath);
+          const rel = toRelativeWebPath(pageDir, targetPath);
+          $(el).attr("src", rel);
+          $(el).text("");
+          maybeAddAsset(assets, seenAssetRecords, {
+            url: `${current.url}#inline-script-${inlineIndex}`,
+            kind: "script",
+            savedPath
+          });
         }
       }
     }
@@ -470,6 +549,74 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       const relHref = toRelativeWebPath(pageDir, targetHtml);
       $(el).attr("href", relHref);
     });
+
+    if (options.everything) {
+      const attrSelectors: Array<{ selector: string; attr: string }> = [
+        { selector: "img[src]", attr: "src" },
+        { selector: "video[src]", attr: "src" },
+        { selector: "audio[src]", attr: "src" },
+        { selector: "track[src]", attr: "src" },
+        { selector: "iframe[src]", attr: "src" },
+        { selector: "embed[src]", attr: "src" },
+        { selector: "object[data]", attr: "data" },
+        { selector: "input[src]", attr: "src" },
+        { selector: "link[href]", attr: "href" },
+        { selector: "source[src]", attr: "src" },
+        { selector: "image[href]", attr: "href" },
+        { selector: "image[xlink\\:href]", attr: "xlink:href" },
+        { selector: "use[href]", attr: "href" },
+        { selector: "use[xlink\\:href]", attr: "xlink:href" }
+      ];
+
+      for (const { selector, attr } of attrSelectors) {
+        const nodes = $(selector).toArray();
+        for (const el of nodes) {
+          if (selector === "link[href]" && $(el).attr("rel")?.toLowerCase() === "stylesheet") {
+            continue;
+          }
+          await downloadAndRelinkAttribute(
+            $,
+            el,
+            attr,
+            current.url,
+            pageDir,
+            outDir,
+            options,
+            assetMap,
+            assets,
+            seenAssetRecords,
+            warnings
+          );
+        }
+      }
+
+      const downloadableAnchors = $("a[href]").toArray();
+      for (const el of downloadableAnchors) {
+        const href = $(el).attr("href");
+        if (!href) continue;
+        if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) {
+          continue;
+        }
+        const absolute = normalizeUrl(href, current.url);
+        if (!absolute) continue;
+        const normalized = normalizePageUrl(absolute);
+        const isInternalHtml = normalized ? isSameOriginHtmlLink(normalized, rootOrigin) : false;
+        if (isInternalHtml) continue;
+        await downloadAndRelinkAttribute(
+          $,
+          el,
+          "href",
+          current.url,
+          pageDir,
+          outDir,
+          options,
+          assetMap,
+          assets,
+          seenAssetRecords,
+          warnings
+        );
+      }
+    }
 
     const cssMerged = cssBlocks.join("\n\n");
     const cssUrls = Array.from(cssMerged.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g))
