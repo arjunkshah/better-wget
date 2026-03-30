@@ -1,9 +1,11 @@
 {
-  "name": "scrapify",
+  "name": "@agents-npm-packages/cleanscrape",
   "version": "0.1.0",
   "description": "Clean frontend extractor: convert live sites into editable HTML/CSS/assets",
   "type": "module",
   "bin": {
+    "cleanscrape": "dist/cli.js",
+    "scraper": "dist/cli.js",
     "scrapify": "dist/cli.js",
     "better-wget": "dist/cli.js"
   },
@@ -13,6 +15,11 @@
     "start": "node dist/cli.js",
     "check": "tsc --noEmit -p tsconfig.json"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "wget",
     "curl",

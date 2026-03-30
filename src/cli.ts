@@ -89,7 +89,7 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
       }
     }
 
-    console.log(`\nPreview with: scrapify run ${outDir}`);
+    console.log(`\nPreview with: cleanscrape run ${outDir}`);
   } catch (error) {
     console.error("Extraction failed:");
     console.error(error);
@@ -131,13 +131,15 @@ const defaultOptions: CliOptions = {
 
 const invokedAs = path.basename(fileURLToPath(import.meta.url));
 const argv0 = path.basename(process.argv[1] || "");
-const isScrapify = argv0 === "scrapify" || invokedAs === "scrapify.js";
+const cliAliases = new Set(["scrapify", "scraper", "cleanscrape"]);
+const activeCliName = cliAliases.has(argv0) ? argv0 : "scrapify";
+const isScrapify = cliAliases.has(argv0) || cliAliases.has(invokedAs.replace(/\.js$/, ""));
 
 if (isScrapify) {
   if (process.argv[2] === "help") {
     const helpProgram = new Command();
     helpProgram
-      .name("scrapify")
+      .name(activeCliName)
       .description("Scrape a site into clean editable frontend code")
       .argument("<url>", "Website URL")
       .option("-o, --out <dir>", "Output directory", defaultOptions.out)
@@ -156,7 +158,7 @@ if (isScrapify) {
   if (process.argv[2] === "run") {
     const runProgram = new Command();
     runProgram
-      .name("scrapify run")
+      .name(`${activeCliName} run`)
       .description("Serve a scraped output folder locally")
       .argument("[dir]", "Scraped output directory", "./output")
       .option("-p, --port <port>", "Port", "4173")
@@ -165,14 +167,14 @@ if (isScrapify) {
         await runPreview(typeof dir === "string" ? dir : undefined, opts as RunOptions);
       });
 
-    runProgram.parseAsync(["node", "scrapify", ...process.argv.slice(3)]).catch((err) => {
+    runProgram.parseAsync(["node", activeCliName, ...process.argv.slice(3)]).catch((err) => {
       console.error(err);
       process.exit(1);
     });
   } else {
     const program = new Command();
     program
-      .name("scrapify")
+      .name(activeCliName)
       .description("Scrape a site into clean editable frontend code")
       .argument("<url>", "Website URL")
       .option("-o, --out <dir>", "Output directory", defaultOptions.out)

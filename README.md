@@ -16,8 +16,8 @@ Traditional download tools optimize for raw bytes. This tool optimizes for **cle
 ## Install
 
 ```bash
-# global install (after package is published to npm)
-npm install -g scrapify
+# global install
+npm install -g @agents-npm-packages/cleanscrape
 
 # local development
 npm install
@@ -29,16 +29,16 @@ npm link
 
 ```bash
 # direct command
-scrapify https://example.com -o ./output/example
+cleanscrape https://example.com -o ./output/example
 
 # run the scraped site locally
-scrapify run ./output/example --port 4173
+cleanscrape run ./output/example --port 4173
 
 # everything mode is now default; disable with --no-everything
-scrapify https://example.com -o ./output/example --mode clean
+cleanscrape https://example.com -o ./output/example --mode clean
 
 # strict clean pass for ultra-editable output
-scrapify https://example.com -o ./output/example --strict-clean
+cleanscrape https://example.com -o ./output/example --strict-clean
 
 # whole-site clean crawl (default): follows internal links and strips scripts/tracker junk
 node dist/cli.js frontend https://example.com -o ./output/example --mode clean
