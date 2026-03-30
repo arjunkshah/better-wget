@@ -1,6 +1,6 @@
 {
   "name": "cleanscrape",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Clean frontend extractor: convert live sites into editable HTML/CSS/assets",
   "type": "module",
   "bin": {
