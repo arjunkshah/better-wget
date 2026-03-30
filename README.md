@@ -49,6 +49,9 @@ cleanscrape https://example.com -o ./output/example --mode clean
 # strict clean pass for ultra-editable output
 cleanscrape https://example.com -o ./output/example --strict-clean
 
+# scrape only one page (no internal link crawl)
+cleanscrape https://linear.app/homepage -o ./output/linear-homepage --strict-clean --single-page
+
 # save this run as your default template
 cleanscrape https://example.com --save-default
 

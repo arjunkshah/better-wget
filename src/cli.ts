@@ -17,6 +17,7 @@ interface CliOptions {
   mode: string;
   everything?: boolean;
   strictClean?: boolean;
+  singlePage?: boolean;
   timeout: string;
   depth: string;
   maxPages: string;
@@ -160,13 +161,17 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
     process.exit(1);
   }
 
-  const crawlDepth = Number(opts.depth);
+  const crawlDepthRaw = Number(opts.depth);
+  const maxPagesRaw = Number(opts.maxPages);
+
+  const crawlDepth = opts.singlePage ? 0 : crawlDepthRaw;
+  const maxPages = opts.singlePage ? 1 : maxPagesRaw;
+
   if (!Number.isFinite(crawlDepth) || crawlDepth < 0) {
     console.error(`Invalid depth: ${opts.depth}`);
     process.exit(1);
   }
 
-  const maxPages = Number(opts.maxPages);
   if (!Number.isFinite(maxPages) || maxPages < 1) {
     console.error(`Invalid max-pages: ${opts.maxPages}`);
     process.exit(1);
@@ -178,6 +183,9 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
   console.log(`Strict clean: ${opts.strictClean ? "yes" : "no"}`);
   console.log(`Depth: ${crawlDepth}`);
   console.log(`Max pages: ${maxPages}`);
+  if (opts.singlePage) {
+    console.log("Single page: yes");
+  }
   console.log(`Output: ${outDir}`);
 
   try {
@@ -305,6 +313,7 @@ if (isScrapify) {
       .option("--everything", "Capture all discoverable assets/code and keep scripts")
       .option("--no-everything", "Disable full capture mode")
       .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
+      .option("--single-page", "Scrape only the provided page (no internal page crawl)")
       .option("--quiet", "Hide per-file streaming logs")
       .option("--save-default", "Save this run's URL/options as defaults")
       .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
@@ -340,6 +349,7 @@ if (isScrapify) {
       .option("--everything", "Capture all discoverable assets/code and keep scripts")
       .option("--no-everything", "Disable full capture mode")
       .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
+      .option("--single-page", "Scrape only the provided page (no internal page crawl)")
       .option("--quiet", "Hide per-file streaming logs")
       .option("--save-default", "Save this run's URL/options as defaults")
       .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
