@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 
 import { Command } from "commander";
 
@@ -17,11 +21,128 @@ interface CliOptions {
   depth: string;
   maxPages: string;
   userAgent?: string;
+  saveDefault?: boolean;
 }
 
 interface RunOptions {
   port: string;
   host: string;
+}
+
+interface StoredConfig {
+  defaultUrl?: string;
+  mode?: "clean" | "mirror";
+  out?: string;
+  everything?: boolean;
+  strictClean?: boolean;
+  timeout?: string;
+  depth?: string;
+  maxPages?: string;
+}
+
+const CONFIG_PATH = path.join(os.homedir(), ".cleanscrape", "config.json");
+
+async function readConfig(): Promise<StoredConfig> {
+  try {
+    const raw = await readFile(CONFIG_PATH, "utf8");
+    return JSON.parse(raw) as StoredConfig;
+  } catch {
+    return {};
+  }
+}
+
+async function writeConfig(config: StoredConfig): Promise<void> {
+  await mkdir(path.dirname(CONFIG_PATH), { recursive: true });
+  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
+}
+
+async function setDefaultUrl(url: string): Promise<void> {
+  const config = await readConfig();
+  config.defaultUrl = url;
+  await writeConfig(config);
+}
+
+async function askInteractive(promptLabel: string, fallback = ""): Promise<string> {
+  const rl = createInterface({ input, output });
+  try {
+    const suffix = fallback ? ` [${fallback}]` : "";
+    const answer = (await rl.question(`${promptLabel}${suffix}: `)).trim();
+    return answer || fallback;
+  } finally {
+    rl.close();
+  }
+}
+
+async function askYesNo(promptLabel: string, fallback: boolean): Promise<boolean> {
+  const defaultText = fallback ? "Y/n" : "y/N";
+  const answer = (await askInteractive(`${promptLabel} (${defaultText})`, "")).toLowerCase();
+  if (!answer) return fallback;
+  return answer === "y" || answer === "yes";
+}
+
+async function resolveInteractiveRun(
+  urlArg: string | undefined,
+  opts: CliOptions,
+  config: StoredConfig
+): Promise<{ url: string; opts: CliOptions }> {
+  const modeDefault = String(opts.mode || config.mode || "clean");
+  const outDefault = String(opts.out || config.out || "./output");
+  const timeoutDefault = String(opts.timeout || config.timeout || "60000");
+  const depthDefault = String(opts.depth || config.depth || "3");
+  const maxPagesDefault = String(opts.maxPages || config.maxPages || "100");
+  const everythingDefault =
+    typeof opts.everything === "boolean" ? opts.everything : typeof config.everything === "boolean" ? config.everything : true;
+  const strictDefault =
+    typeof opts.strictClean === "boolean" ? opts.strictClean : typeof config.strictClean === "boolean" ? config.strictClean : false;
+
+  if (urlArg) {
+    return {
+      url: urlArg,
+      opts: {
+        ...opts,
+        mode: String(opts.mode || config.mode || "clean"),
+        out: String(opts.out || config.out || "./output"),
+        timeout: String(opts.timeout || config.timeout || "60000"),
+        depth: String(opts.depth || config.depth || "3"),
+        maxPages: String(opts.maxPages || config.maxPages || "100"),
+        everything: typeof opts.everything === "boolean" ? opts.everything : config.everything ?? true,
+        strictClean: typeof opts.strictClean === "boolean" ? opts.strictClean : config.strictClean ?? false
+      }
+    };
+  }
+
+  const url = await askInteractive("Website URL (example: https://your-app.vercel.app)", config.defaultUrl || "");
+  if (!url) {
+    console.error("No URL provided.");
+    process.exit(1);
+  }
+
+  let mode = modeDefault;
+  while (mode !== "clean" && mode !== "mirror") {
+    mode = await askInteractive("Mode (clean|mirror)", "clean");
+  }
+
+  const out = await askInteractive("Output directory", outDefault);
+  const timeout = await askInteractive("Timeout (ms)", timeoutDefault);
+  const depth = await askInteractive("Crawl depth", depthDefault);
+  const maxPages = await askInteractive("Max pages", maxPagesDefault);
+  const everything = await askYesNo("Capture everything", everythingDefault);
+  const strictClean = await askYesNo("Enable strict clean", strictDefault);
+  const saveDefault = await askYesNo("Save these as defaults", false);
+
+  const mergedOpts: CliOptions = {
+    ...opts,
+    mode,
+    out,
+    timeout,
+    depth,
+    maxPages,
+    everything,
+    strictClean,
+    saveDefault
+  };
+
+  return { url, opts: mergedOpts };
 }
 
 async function runExtraction(url: string, opts: CliOptions): Promise<void> {
@@ -89,6 +210,20 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
       }
     }
 
+    if (opts.saveDefault) {
+      await writeConfig({
+        defaultUrl: url,
+        mode,
+        out: opts.out,
+        everything: opts.everything !== false,
+        strictClean: Boolean(opts.strictClean),
+        timeout: opts.timeout,
+        depth: opts.depth,
+        maxPages: opts.maxPages
+      });
+      console.log(`Saved defaults to ${CONFIG_PATH}`);
+    }
+
     console.log(`\nPreview with: cleanscrape run ${outDir}`);
   } catch (error) {
     console.error("Extraction failed:");
@@ -132,30 +267,50 @@ const defaultOptions: CliOptions = {
 const invokedAs = path.basename(fileURLToPath(import.meta.url));
 const argv0 = path.basename(process.argv[1] || "");
 const cliAliases = new Set(["scrapify", "scraper", "cleanscrape"]);
-const activeCliName = cliAliases.has(argv0) ? argv0 : "scrapify";
+const activeCliName = cliAliases.has(argv0) ? argv0 : "cleanscrape";
 const isScrapify = cliAliases.has(argv0) || cliAliases.has(invokedAs.replace(/\.js$/, ""));
 
 if (isScrapify) {
-  if (process.argv[2] === "help") {
+  if (process.argv[2] === "default") {
+    const defaultProgram = new Command();
+    defaultProgram
+      .name(`${activeCliName} default`)
+      .description("Set default URL used by interactive mode")
+      .argument("[url]", "Default website URL")
+      .action(async (url) => {
+        const resolved = typeof url === "string" && url.trim() ? url.trim() : await askInteractive("Default URL");
+        if (!resolved) {
+          console.error("No default URL provided.");
+          process.exit(1);
+        }
+        await setDefaultUrl(resolved);
+        console.log(`Default URL set: ${resolved}`);
+        console.log(`Config: ${CONFIG_PATH}`);
+      });
+
+    defaultProgram.parseAsync(["node", activeCliName, ...process.argv.slice(3)]).catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+  } else if (process.argv[2] === "help") {
     const helpProgram = new Command();
     helpProgram
       .name(activeCliName)
       .description("Scrape a site into clean editable frontend code")
-      .argument("<url>", "Website URL")
+      .argument("[url]", "Website URL")
       .option("-o, --out <dir>", "Output directory", defaultOptions.out)
       .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
       .option("--everything", "Capture all discoverable assets/code and keep scripts")
       .option("--no-everything", "Disable full capture mode")
       .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
+      .option("--save-default", "Save this run's URL/options as defaults")
       .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
       .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
       .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)
       .option("--user-agent <ua>", "Custom user agent");
     helpProgram.outputHelp();
     process.exit(0);
-  }
-
-  if (process.argv[2] === "run") {
+  } else if (process.argv[2] === "run") {
     const runProgram = new Command();
     runProgram
       .name(`${activeCliName} run`)
@@ -176,18 +331,25 @@ if (isScrapify) {
     program
       .name(activeCliName)
       .description("Scrape a site into clean editable frontend code")
-      .argument("<url>", "Website URL")
+      .argument("[url]", "Website URL")
       .option("-o, --out <dir>", "Output directory", defaultOptions.out)
       .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
       .option("--everything", "Capture all discoverable assets/code and keep scripts")
       .option("--no-everything", "Disable full capture mode")
       .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
+      .option("--save-default", "Save this run's URL/options as defaults")
       .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
       .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
       .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)
       .option("--user-agent <ua>", "Custom user agent")
       .action(async (url, opts) => {
-        await runExtraction(url, opts as CliOptions);
+        const config = await readConfig();
+        const resolved = await resolveInteractiveRun(
+          typeof url === "string" && url.trim() ? url.trim() : undefined,
+          opts as CliOptions,
+          config
+        );
+        await runExtraction(resolved.url, resolved.opts);
       });
 
     program.parseAsync(process.argv).catch((err) => {

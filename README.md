@@ -17,7 +17,7 @@ Traditional download tools optimize for raw bytes. This tool optimizes for **cle
 
 ```bash
 # global install
-npm install -g @agents-npm-packages/cleanscrape
+npm install -g cleanscrape
 
 # local development
 npm install
@@ -31,6 +31,12 @@ npm link
 # direct command
 cleanscrape https://example.com -o ./output/example
 
+# interactive mode (prompts for URL/mode/etc.)
+cleanscrape
+
+# set and reuse a default URL (for example a Vercel URL)
+cleanscrape default https://your-app.vercel.app
+
 # run the scraped site locally
 cleanscrape run ./output/example --port 4173
 
@@ -39,6 +45,9 @@ cleanscrape https://example.com -o ./output/example --mode clean
 
 # strict clean pass for ultra-editable output
 cleanscrape https://example.com -o ./output/example --strict-clean
+
+# save this run as your default template
+cleanscrape https://example.com --save-default
 
 # whole-site clean crawl (default): follows internal links and strips scripts/tracker junk
 node dist/cli.js frontend https://example.com -o ./output/example --mode clean

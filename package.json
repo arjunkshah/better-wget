@@ -1,5 +1,5 @@
 {
-  "name": "@agents-npm-packages/cleanscrape",
+  "name": "cleanscrape",
   "version": "0.1.0",
   "description": "Clean frontend extractor: convert live sites into editable HTML/CSS/assets",
   "type": "module",
