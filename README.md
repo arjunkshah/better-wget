@@ -16,8 +16,13 @@ Traditional download tools optimize for raw bytes. This tool optimizes for **cle
 ## Install
 
 ```bash
+# global install (after package is published to npm)
+npm install -g scrapify
+
+# local development
 npm install
 npm run build
+npm link
 ```
 
 ## Usage

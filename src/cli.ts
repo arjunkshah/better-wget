@@ -134,6 +134,25 @@ const argv0 = path.basename(process.argv[1] || "");
 const isScrapify = argv0 === "scrapify" || invokedAs === "scrapify.js";
 
 if (isScrapify) {
+  if (process.argv[2] === "help") {
+    const helpProgram = new Command();
+    helpProgram
+      .name("scrapify")
+      .description("Scrape a site into clean editable frontend code")
+      .argument("<url>", "Website URL")
+      .option("-o, --out <dir>", "Output directory", defaultOptions.out)
+      .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
+      .option("--everything", "Capture all discoverable assets/code and keep scripts")
+      .option("--no-everything", "Disable full capture mode")
+      .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
+      .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
+      .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
+      .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)
+      .option("--user-agent <ua>", "Custom user agent");
+    helpProgram.outputHelp();
+    process.exit(0);
+  }
+
   if (process.argv[2] === "run") {
     const runProgram = new Command();
     runProgram

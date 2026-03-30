@@ -1,11 +1,11 @@
 {
-  "name": "better-wget",
+  "name": "scrapify",
   "version": "0.1.0",
   "description": "Clean frontend extractor: convert live sites into editable HTML/CSS/assets",
   "type": "module",
   "bin": {
-    "better-wget": "dist/cli.js",
-    "scrapify": "dist/cli.js"
+    "scrapify": "dist/cli.js",
+    "better-wget": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
