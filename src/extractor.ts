@@ -224,11 +224,12 @@ function maybeAddAsset(
   assets: AssetRecord[],
   seen: Set<string>,
   record: AssetRecord
-): void {
+): boolean {
   const key = `${record.kind}:${record.savedPath}`;
-  if (seen.has(key)) return;
+  if (seen.has(key)) return false;
   seen.add(key);
   assets.push(record);
+  return true;
 }
 
 function isSameOriginHtmlLink(candidateUrl: string, rootOrigin: string): boolean {
@@ -292,7 +293,8 @@ async function downloadAndRelinkAttribute(
   assetMap: Map<string, string>,
   assets: AssetRecord[],
   seenAssetRecords: Set<string>,
-  warnings: string[]
+  warnings: string[],
+  onProgress?: (message: string) => void
 ): Promise<void> {
   const value = $(el).attr(attr);
   if (!value) return;
@@ -321,14 +323,19 @@ async function downloadAndRelinkAttribute(
   const rel = toRelativeWebPath(pageDir, localPath);
   $(el).attr(attr, rel);
 
-  maybeAddAsset(assets, seenAssetRecords, {
+  const added = maybeAddAsset(assets, seenAssetRecords, {
     url: absolute,
     kind: inferAssetKind(absolute),
     savedPath
   });
+  if (added && onProgress) onProgress(`[asset:${inferAssetKind(absolute)}] ${savedPath}`);
 }
 
 export async function extractFrontend(options: ExtractOptions): Promise<ExtractSummary> {
+  const progress = (msg: string): void => {
+    if (options.onProgress) options.onProgress(msg);
+  };
+
   const everything = options.everything === true;
   const strictClean = options.strictClean === true;
 
@@ -358,6 +365,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
     if (visited.has(current.url)) continue;
 
     visited.add(current.url);
+    progress(`[page] Fetching ${current.url}`);
 
     let htmlRes: Response;
     try {
@@ -380,6 +388,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
 
     const domHtml = await htmlRes.text();
     const $ = load(domHtml);
+    progress(`[page] Parsing ${current.url}`);
 
     if (current.depth < options.crawlDepth) {
       const discovered = new Set<string>();
@@ -488,11 +497,12 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
         const rel = toRelativeWebPath(pageDir, localPath);
         $(el).attr(attr, rel);
 
-        maybeAddAsset(assets, seenAssetRecords, {
+        const added = maybeAddAsset(assets, seenAssetRecords, {
           url: absolute,
           kind: inferBinaryAssetKind(absolute) === "font" ? "font" : "image",
           savedPath
         });
+        if (added) progress(`[asset:image] ${savedPath}`);
       } catch (error) {
         warnings.push(`Failed to fetch media: ${absolute} (${String(error)})`);
       }
@@ -540,11 +550,12 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
           const rel = toRelativeWebPath(pageDir, localPath);
           $(el).attr("src", rel);
 
-          maybeAddAsset(assets, seenAssetRecords, {
+          const added = maybeAddAsset(assets, seenAssetRecords, {
             url: absolute,
             kind: "script",
             savedPath
           });
+          if (added) progress(`[asset:script] ${savedPath}`);
         } catch (error) {
           warnings.push(`Failed to fetch script: ${absolute} (${String(error)})`);
         }
@@ -563,11 +574,12 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
           const rel = toRelativeWebPath(pageDir, targetPath);
           $(el).attr("src", rel);
           $(el).text("");
-          maybeAddAsset(assets, seenAssetRecords, {
+          const added = maybeAddAsset(assets, seenAssetRecords, {
             url: `${current.url}#inline-script-${inlineIndex}`,
             kind: "script",
             savedPath
           });
+          if (added) progress(`[asset:script] ${savedPath}`);
         }
       }
     }
@@ -626,7 +638,8 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
             assetMap,
             assets,
             seenAssetRecords,
-            warnings
+            warnings,
+            progress
           );
         }
       }
@@ -654,7 +667,8 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
           assetMap,
           assets,
           seenAssetRecords,
-          warnings
+          warnings,
+          progress
         );
       }
     }
@@ -673,11 +687,12 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       const localPath = path.join(outDir, savedPath);
       const rel = toRelativeWebPath(cssDir, localPath);
       rewrittenCss = rewrittenCss.split(cssUrl).join(rel);
-      maybeAddAsset(assets, seenAssetRecords, {
+      const added = maybeAddAsset(assets, seenAssetRecords, {
         url: abs,
         kind: inferBinaryAssetKind(abs) === "font" ? "font" : "image",
         savedPath
       });
+      if (added) progress(`[asset:${inferBinaryAssetKind(abs)}] ${savedPath}`);
     }
 
     if (strictClean) {
@@ -695,6 +710,8 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
 
     await saveTextFile(pagePaths.htmlPath, await formatMaybe(finalHtml, "html"));
     await saveTextFile(pagePaths.cssPath, await formatMaybe(rewrittenCss, "css"));
+    progress(`[write] ${path.relative(outDir, pagePaths.htmlPath)}`);
+    progress(`[write] ${path.relative(outDir, pagePaths.cssPath)}`);
 
     pages.push({
       url: current.url,
@@ -740,6 +757,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       2
     )
   );
+  progress("[done] Wrote manifest.json");
 
   const rootPagePaths = getPagePaths(normalizedRootUrl, outDir);
 

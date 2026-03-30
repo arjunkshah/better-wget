@@ -6,6 +6,7 @@ export interface ExtractOptions {
   mode: ExportMode;
   everything?: boolean;
   strictClean?: boolean;
+  onProgress?: (message: string) => void;
   timeoutMs: number;
   crawlDepth: number;
   maxPages: number;

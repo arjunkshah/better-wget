@@ -22,6 +22,7 @@ interface CliOptions {
   maxPages: string;
   userAgent?: string;
   saveDefault?: boolean;
+  quiet?: boolean;
 }
 
 interface RunOptions {
@@ -186,6 +187,7 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
       mode,
       everything: opts.everything !== false,
       strictClean: Boolean(opts.strictClean),
+      onProgress: opts.quiet ? undefined : (message) => console.log(message),
       timeoutMs,
       crawlDepth,
       maxPages,
@@ -303,6 +305,7 @@ if (isScrapify) {
       .option("--everything", "Capture all discoverable assets/code and keep scripts")
       .option("--no-everything", "Disable full capture mode")
       .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
+      .option("--quiet", "Hide per-file streaming logs")
       .option("--save-default", "Save this run's URL/options as defaults")
       .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
       .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
@@ -337,6 +340,7 @@ if (isScrapify) {
       .option("--everything", "Capture all discoverable assets/code and keep scripts")
       .option("--no-everything", "Disable full capture mode")
       .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
+      .option("--quiet", "Hide per-file streaming logs")
       .option("--save-default", "Save this run's URL/options as defaults")
       .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
       .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
