@@ -12,6 +12,7 @@ interface CliOptions {
   out: string;
   mode: string;
   everything?: boolean;
+  strictClean?: boolean;
   timeout: string;
   depth: string;
   maxPages: string;
@@ -51,7 +52,8 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
 
   console.log(`Extracting ${url}`);
   console.log(`Mode: ${mode}`);
-  console.log(`Everything: ${opts.everything ? "yes" : "no"}`);
+  console.log(`Everything: ${opts.everything !== false ? "yes" : "no"}`);
+  console.log(`Strict clean: ${opts.strictClean ? "yes" : "no"}`);
   console.log(`Depth: ${crawlDepth}`);
   console.log(`Max pages: ${maxPages}`);
   console.log(`Output: ${outDir}`);
@@ -61,7 +63,8 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
       url,
       outDir,
       mode,
-      everything: Boolean(opts.everything),
+      everything: opts.everything !== false,
+      strictClean: Boolean(opts.strictClean),
       timeoutMs,
       crawlDepth,
       maxPages,
@@ -75,6 +78,9 @@ async function runExtraction(url: string, opts: CliOptions): Promise<void> {
     }
     console.log(`Pages exported: ${summary.pageCount}`);
     console.log(`Assets downloaded: ${summary.assets.length}`);
+    console.log(
+      `Verify: pages=${summary.verification.pages} assets=${summary.verification.assets} scripts=${summary.verification.scripts} styles=${summary.verification.stylesheets} fonts=${summary.verification.fonts} images=${summary.verification.images} others=${summary.verification.others} remote_urls_remaining=${summary.verification.remoteUrlsRemaining}`
+    );
 
     if (summary.warnings.length > 0) {
       console.log("\nWarnings:");
@@ -117,6 +123,7 @@ async function runPreview(dirArg: string | undefined, opts: RunOptions): Promise
 const defaultOptions: CliOptions = {
   out: "./output",
   mode: "clean",
+  everything: true,
   timeout: "60000",
   depth: "3",
   maxPages: "100"
@@ -152,6 +159,8 @@ if (isScrapify) {
       .option("-o, --out <dir>", "Output directory", defaultOptions.out)
       .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
       .option("--everything", "Capture all discoverable assets/code and keep scripts")
+      .option("--no-everything", "Disable full capture mode")
+      .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
       .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
       .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
       .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)
@@ -179,6 +188,8 @@ if (isScrapify) {
     .option("-o, --out <dir>", "Output directory", defaultOptions.out)
     .option("-m, --mode <mode>", "Export mode: clean or mirror", defaultOptions.mode)
     .option("--everything", "Capture all discoverable assets/code and keep scripts")
+    .option("--no-everything", "Disable full capture mode")
+    .option("--strict-clean", "Aggressively strip noisy attributes/comments for cleaner manual edits")
     .option("-t, --timeout <ms>", "Timeout in milliseconds", defaultOptions.timeout)
     .option("-d, --depth <n>", "Internal link crawl depth", defaultOptions.depth)
     .option("--max-pages <n>", "Maximum pages to crawl", defaultOptions.maxPages)

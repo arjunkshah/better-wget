@@ -29,8 +29,11 @@ scrapify https://example.com -o ./output/example
 # run the scraped site locally
 scrapify run ./output/example --port 4173
 
-# full-capture mode: keep scripts + pull all discoverable assets/files
-scrapify https://example.com -o ./output/example --everything --mode clean
+# everything mode is now default; disable with --no-everything
+scrapify https://example.com -o ./output/example --mode clean
+
+# strict clean pass for ultra-editable output
+scrapify https://example.com -o ./output/example --strict-clean
 
 # whole-site clean crawl (default): follows internal links and strips scripts/tracker junk
 node dist/cli.js frontend https://example.com -o ./output/example --mode clean
@@ -60,6 +63,10 @@ output/example/
   assets/
     <hostname>/...
 ```
+
+CLI prints a verification report after each scrape:
+- pages/assets/scripts/styles/fonts/images/others counts
+- `remote_urls_remaining` so you can quickly see if anything external is still referenced
 
 ## Roadmap
 

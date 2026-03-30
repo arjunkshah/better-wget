@@ -5,6 +5,7 @@ export interface ExtractOptions {
   outDir: string;
   mode: ExportMode;
   everything?: boolean;
+  strictClean?: boolean;
   timeoutMs: number;
   crawlDepth: number;
   maxPages: number;
@@ -23,6 +24,16 @@ export interface ExtractSummary {
   outDir: string;
   htmlPath: string;
   cssPath?: string;
+  verification: {
+    pages: number;
+    assets: number;
+    scripts: number;
+    stylesheets: number;
+    fonts: number;
+    images: number;
+    others: number;
+    remoteUrlsRemaining: number;
+  };
   pageCount: number;
   pages: Array<{
     url: string;

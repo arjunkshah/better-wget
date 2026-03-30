@@ -254,6 +254,33 @@ function toRelativeWebPath(fromDir: string, toPath: string): string {
   return rel.startsWith(".") ? rel : `./${rel}`;
 }
 
+function strictCleanDom($: ReturnType<typeof load>): void {
+  $("*").each((_, el) => {
+    const attrs = Object.keys((el as any).attribs || {});
+    for (const attrName of attrs) {
+      const lower = attrName.toLowerCase();
+      if (lower.startsWith("data-") || lower.startsWith("on")) {
+        $(el).removeAttr(attrName);
+        continue;
+      }
+      if (
+        lower === "nonce" ||
+        lower === "integrity" ||
+        lower === "crossorigin" ||
+        lower === "fetchpriority" ||
+        lower === "referrerpolicy"
+      ) {
+        $(el).removeAttr(attrName);
+      }
+    }
+  });
+}
+
+function findRemoteUrls(content: string): string[] {
+  const matches = content.match(/(?:https?:)?\/\/[^\s"'()<>]+/g) || [];
+  return matches.map((u) => u.trim()).filter(Boolean);
+}
+
 async function downloadAndRelinkAttribute(
   $: ReturnType<typeof load>,
   el: Parameters<ReturnType<typeof load>["prototype"]["each"]>[1] | any,
@@ -269,6 +296,16 @@ async function downloadAndRelinkAttribute(
 ): Promise<void> {
   const value = $(el).attr(attr);
   if (!value) return;
+  if (
+    value.startsWith("./") ||
+    value.startsWith("../") ||
+    value.startsWith("assets/") ||
+    value.startsWith("/assets/") ||
+    value.startsWith("src/") ||
+    value.startsWith("/src/")
+  ) {
+    return;
+  }
 
   const absolute = normalizeUrl(value, baseUrl);
   if (!absolute) return;
@@ -292,6 +329,9 @@ async function downloadAndRelinkAttribute(
 }
 
 export async function extractFrontend(options: ExtractOptions): Promise<ExtractSummary> {
+  const everything = options.everything === true;
+  const strictClean = options.strictClean === true;
+
   const outDir = path.resolve(options.outDir);
   await mkdir(path.join(outDir, "src"), { recursive: true });
 
@@ -307,6 +347,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
   const assets: AssetRecord[] = [];
   const warnings: string[] = [];
   const pages: Array<{ url: string; htmlPath: string; cssPath: string }> = [];
+  const remoteUrlsRemaining = new Set<string>();
 
   const assetMap = new Map<string, string>();
   const seenAssetRecords = new Set<string>();
@@ -457,7 +498,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       }
     }
 
-    const keepScripts = options.mode !== "clean" || options.everything === true;
+    const keepScripts = options.mode !== "clean" || everything;
 
     if (!keepScripts) {
       $("script").remove();
@@ -509,7 +550,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
         }
       }
 
-      if (options.everything) {
+      if (everything) {
         let inlineIndex = 0;
         const inlineScripts = $("script:not([src])").toArray();
         for (const el of inlineScripts) {
@@ -550,7 +591,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       $(el).attr("href", relHref);
     });
 
-    if (options.everything) {
+    if (everything) {
       const attrSelectors: Array<{ selector: string; attr: string }> = [
         { selector: "img[src]", attr: "src" },
         { selector: "video[src]", attr: "src" },
@@ -639,7 +680,18 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       });
     }
 
-    const finalHtml = $.html();
+    if (strictClean) {
+      strictCleanDom($);
+    }
+
+    const finalHtml = strictClean ? $.html().replace(/<!--[\s\S]*?-->/g, "") : $.html();
+
+    for (const u of findRemoteUrls(finalHtml)) {
+      remoteUrlsRemaining.add(u);
+    }
+    for (const u of findRemoteUrls(rewrittenCss)) {
+      remoteUrlsRemaining.add(u);
+    }
 
     await saveTextFile(pagePaths.htmlPath, await formatMaybe(finalHtml, "html"));
     await saveTextFile(pagePaths.cssPath, await formatMaybe(rewrittenCss, "css"));
@@ -651,18 +703,37 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
     });
   }
 
+  const scriptsCount = assets.filter((a) => a.kind === "script").length;
+  const stylesheetsCount = assets.filter((a) => a.kind === "stylesheet").length;
+  const fontsCount = assets.filter((a) => a.kind === "font").length;
+  const imagesCount = assets.filter((a) => a.kind === "image").length;
+  const othersCount = assets.filter((a) => a.kind === "other").length;
+  const verification = {
+    pages: pages.length,
+    assets: assets.length,
+    scripts: scriptsCount,
+    stylesheets: stylesheetsCount,
+    fonts: fontsCount,
+    images: imagesCount,
+    others: othersCount,
+    remoteUrlsRemaining: remoteUrlsRemaining.size
+  };
+
   await saveTextFile(
     path.join(outDir, "manifest.json"),
     JSON.stringify(
       {
         sourceUrl: options.url,
         mode: options.mode,
+        everything,
+        strictClean,
         exportedAt: new Date().toISOString(),
         crawlDepth: options.crawlDepth,
         maxPages: options.maxPages,
         pageCount: pages.length,
         pages,
         assetCount: assets.length,
+        verification,
         warnings
       },
       null,
@@ -677,6 +748,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
     outDir,
     htmlPath: rootPagePaths.htmlPath,
     cssPath: rootPagePaths.cssPath,
+    verification,
     pageCount: pages.length,
     pages,
     assets,
