@@ -249,6 +249,33 @@ function isSameOriginHtmlLink(candidateUrl: string, rootOrigin: string): boolean
   return true;
 }
 
+function getBaseDomain(hostname: string): string {
+  const parts = hostname.toLowerCase().split(".").filter(Boolean);
+  if (parts.length <= 2) return hostname.toLowerCase();
+  return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
+}
+
+function isAllowedAssetHost(assetUrl: string, rootHost: string): boolean {
+  try {
+    const host = new URL(assetUrl).hostname.toLowerCase();
+    const root = rootHost.toLowerCase();
+    const rootBase = getBaseDomain(root);
+    const hostBase = getBaseDomain(host);
+    return host === root || host.endsWith(`.${root}`) || hostBase === rootBase;
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeFileUrl(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    return path.extname(u.pathname.toLowerCase()).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function toRelativeWebPath(fromDir: string, toPath: string): string {
   const rel = path.relative(fromDir, toPath).split(path.sep).join("/");
   if (rel === "") return "./";
@@ -294,7 +321,8 @@ async function downloadAndRelinkAttribute(
   assets: AssetRecord[],
   seenAssetRecords: Set<string>,
   warnings: string[],
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  rootHost?: string
 ): Promise<void> {
   const value = $(el).attr(attr);
   if (!value) return;
@@ -311,7 +339,9 @@ async function downloadAndRelinkAttribute(
 
   const absolute = normalizeUrl(value, baseUrl);
   if (!absolute) return;
+  if (!looksLikeFileUrl(absolute)) return;
   if (isTrackerUrl(absolute)) return;
+  if (rootHost && !isAllowedAssetHost(absolute, rootHost)) return;
 
   const savedPath = await downloadBinaryAsset(absolute, outDir, options.timeoutMs, options.userAgent, assetMap);
   if (!savedPath) {
@@ -348,6 +378,7 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
   }
 
   const rootOrigin = new URL(normalizedRootUrl).origin;
+  const rootHost = new URL(normalizedRootUrl).hostname;
   const queue: Array<{ url: string; depth: number }> = [{ url: normalizedRootUrl, depth: 0 }];
   const visited = new Set<string>();
 
@@ -613,7 +644,10 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
         { selector: "embed[src]", attr: "src" },
         { selector: "object[data]", attr: "data" },
         { selector: "input[src]", attr: "src" },
-        { selector: "link[href]", attr: "href" },
+        { selector: "link[rel~='icon'][href]", attr: "href" },
+        { selector: "link[rel='manifest'][href]", attr: "href" },
+        { selector: "link[rel='preload'][href]", attr: "href" },
+        { selector: "link[rel='prefetch'][href]", attr: "href" },
         { selector: "source[src]", attr: "src" },
         { selector: "image[href]", attr: "href" },
         { selector: "image[xlink\\:href]", attr: "xlink:href" },
@@ -624,9 +658,6 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
       for (const { selector, attr } of attrSelectors) {
         const nodes = $(selector).toArray();
         for (const el of nodes) {
-          if (selector === "link[href]" && $(el).attr("rel")?.toLowerCase() === "stylesheet") {
-            continue;
-          }
           await downloadAndRelinkAttribute(
             $,
             el,
@@ -639,7 +670,8 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
             assets,
             seenAssetRecords,
             warnings,
-            progress
+            progress,
+            rootHost
           );
         }
       }
@@ -653,6 +685,8 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
         }
         const absolute = normalizeUrl(href, current.url);
         if (!absolute) continue;
+        if (!looksLikeFileUrl(absolute)) continue;
+        if (!isAllowedAssetHost(absolute, rootHost)) continue;
         const normalized = normalizePageUrl(absolute);
         const isInternalHtml = normalized ? isSameOriginHtmlLink(normalized, rootOrigin) : false;
         if (isInternalHtml) continue;
@@ -668,7 +702,8 @@ export async function extractFrontend(options: ExtractOptions): Promise<ExtractS
           assets,
           seenAssetRecords,
           warnings,
-          progress
+          progress,
+          rootHost
         );
       }
     }
