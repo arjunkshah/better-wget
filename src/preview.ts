@@ -117,10 +117,34 @@ export async function startPreviewServer(options: PreviewOptions): Promise<Serve
     res.end("Not found");
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.port, options.host, () => resolve());
-  });
+  const maxAttempts = 50;
+  let bound = false;
+  let attemptPort = options.port;
+  let lastError: unknown;
+
+  for (let i = 0; i < maxAttempts; i += 1) {
+    attemptPort = options.port + i;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(attemptPort, options.host, () => resolve());
+      });
+      bound = true;
+      break;
+    } catch (error: unknown) {
+      lastError = error;
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== "EADDRINUSE") {
+        throw error;
+      }
+    }
+  }
+
+  if (!bound) {
+    throw lastError || new Error("No available port found");
+  }
+
+  (server as unknown as { __cleanscrapePort?: number }).__cleanscrapePort = attemptPort;
 
   return server;
 }

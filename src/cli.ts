@@ -252,9 +252,14 @@ async function runPreview(dirArg: string | undefined, opts: RunOptions): Promise
 
   const host = String(opts.host || "127.0.0.1");
   const server = await startPreviewServer({ dir, port, host });
+  const addr = server.address();
+  const activePort = typeof addr === "object" && addr ? addr.port : port;
 
   console.log(`Serving scraped site from ${dir}`);
-  console.log(`Open: http://${host}:${port}`);
+  if (activePort !== port) {
+    console.log(`Port ${port} is busy, switched to ${activePort}`);
+  }
+  console.log(`Open: http://${host}:${activePort}`);
   console.log("Press Ctrl+C to stop.");
 
   const stop = () => {
